@@ -15,24 +15,24 @@ public class InlinePointConstraintMain : MonoBehaviour
 {
   public float Beta = 0.02f;
 
-  public GameObject Object;
-  public GameObject Target;
+  public GameObject Ball;
+  public GameObject P;
 
   private Vector3 v = Vector3.zero;
 
   private void Update()
   {
-    if (Object == null)
+    if (Ball == null)
       return;
 
-    if (Target == null)
+    if (P == null)
       return;
 
     float dt = Time.deltaTime;
-    Vector3 c = Object.transform.position - Target.transform.position;
+    Vector3 c = Ball.transform.position - P.transform.position;
 
     v += (-Beta / dt) * c;
     v *= 0.9f; // temp magic cheat
-    Object.transform.position += v * dt;
+    Ball.transform.position += v * dt;
   }
 }
