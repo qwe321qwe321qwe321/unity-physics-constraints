@@ -13,129 +13,78 @@ using UnityEngine;
 
 using PhysicsConstraints;
 using CjLib;
+public class InlinePointConstraintWithRotationMain : MonoBehaviour
+{
+  public float Beta = 0.02f;
 
-public class InlinePointConstraintWithRotationMain : MonoBehaviour {
-	public float Beta = 0.02f;
-	public int VelocityIterations = 10;
+  public GameObject Object;
+  public GameObject Target;
 
-	public GameObject Box;
-	public GameObject Target;
+  public Vector3 Gravity = new Vector3(0.0f, -20.0f, 0.0f);
 
-	public Vector3 Gravity = new Vector3(0.0f, -9.8f, 0.0f);
-	public bool UseAngularDisplacementConstraint = true;
-	public bool LockRotationX;
-	public bool LockRotationY;
-	public bool LockRotationZ;
+  private float mass;
+  private float massInv;
+  private Matrix3x3 inertiaLs;
+  private Matrix3x3 inertiaInvLs;
 
-	private float mass;
-	private float massInv;
-	private Matrix3x3 inertia;
-	private Matrix3x3 inertiaInv;
+  private Vector3 rLocal = Vector3.zero; // corner offset
+  private Vector3 v = Vector3.zero; // linear velocity
+  private Vector3 a = Vector3.zero; // angular velocity
 
-	private Vector3 rLocal = Vector3.zero; // corner offset
-	// Variables of Position Constraint
-	private Vector3 posR = Vector3.zero;
-	private Vector3 posC = Vector3.zero;
-	// Variables of Rotation Constraint
-	private Vector3 rotC = Vector3.zero;
+  private void Start()
+  {
+    mass = 1.0f;
+    massInv = 1.0f / mass;
 
-	private Vector3 v = Vector3.zero; // linear velocity
-	private Vector3 a = Vector3.zero; // angular velocity
+    inertiaLs = Matrix3x3.Identity; // Inertia.SolidBox(mass, 1.0f * Vector3.one);
+    inertiaInvLs = inertiaLs.Inverted;
 
+    rLocal = 0.5f * Vector3.one;
+  }
 
-	private void Start() {
-		mass = 1.0f;
-		massInv = 1.0f / mass;
+  private void FixedUpdate()
+  {
+    if (Object == null)
+      return;
 
-		inertia = Inertia.SolidBox(mass, 1.0f * Vector3.one);
-		inertiaInv = inertia.Inverted;
+    if (Target == null)
+      return;
 
-		rLocal = 0.5f * Vector3.one;
-	}
+    float dt = Time.fixedDeltaTime;
 
-	private void Update() {
-		if (Box == null)
-			return;
+    Vector3 r = Object.transform.rotation * rLocal;
 
-		if (Target == null)
-			return;
+    var t = Object.transform;
+    Matrix3x3 world2Local =
+      Matrix3x3.FromRows
+      (
+        t.TransformVector(new Vector3(1.0f, 0.0f, 0.0f)),
+        t.TransformVector(new Vector3(0.0f, 1.0f, 0.0f)),
+        t.TransformVector(new Vector3(0.0f, 0.0f, 1.0f))
+      );
+    Matrix3x3 inertiaInvWs = world2Local.Transposed * inertiaInvLs * world2Local;
 
-		float dt = Time.deltaTime;
+    // gravity
+    v += Gravity * dt;
 
-		// gravity
-		v += Gravity * dt;
+    // constraint errors
+    Vector3 cPos = (Object.transform.position + r) - Target.transform.position;
+    Vector3 cVel = v + Vector3.Cross(a, r);
 
-		InitPositionConstraint();
-		InitRotationConstraint();
+    // constraint resolution
+    Matrix3x3 s = Matrix3x3.Skew(-r);
+    Matrix3x3 k = massInv * Matrix3x3.Identity + s * inertiaInvWs * s.Transposed;
+    Matrix3x3 effectiveMass = k.Inverted;
+    Vector3 lambda = effectiveMass * (-(cVel + (Beta / dt) * cPos));
 
-		// Solve.
-		for (int i = 0; i < VelocityIterations; i++) {
-			SolvePositionConstraint(dt);
-			SolveRotationConstraint(dt);
-		}
+    // velocity correction
+    v += massInv * lambda;
+    a += (inertiaInvWs * s.Transposed) * lambda;
+    v *= 0.98f; // temp magic
+    a *= 0.98f; // temp magic
 
-		v *= 0.98f; // temp magic cheat
-		a *= 0.98f; // temp magic cheat
-		// integration
-		Box.transform.position += v * dt;
-		Quaternion q = QuaternionUtil.AxisAngle(VectorUtil.NormalizeSafe(a, Vector3.forward), a.magnitude * dt);
-		Box.transform.rotation = q * Box.transform.rotation;
-	}
-
-	private void InitPositionConstraint() {
-		posR = Box.transform.rotation * rLocal;
-		posC = (Box.transform.position + posR) - Target.transform.position;
-	}
-
-	private void InitRotationConstraint() {
-		Box.transform.rotation.ToAngleAxis(out float qAngle, out Vector3 qAxis);
-		rotC = Vector3.zero;
-		if (!UseAngularDisplacementConstraint) { return; }
-
-		Vector3 lockAngle = Mathf.Deg2Rad * qAngle * qAxis;
-		if (LockRotationX) {
-			rotC.x = lockAngle.x;
-		}
-		if (LockRotationY) {
-			rotC.y = lockAngle.y;
-		}
-		if (LockRotationZ) {
-			rotC.z = lockAngle.z;
-		}
-	}
-
-	private void SolvePositionConstraint(float dt) {
-		Vector3 jV = v + Vector3.Cross(a, posR);
-
-		// constraint resolution
-		Matrix3x3 s = Matrix3x3.PostCross(posR);
-		Matrix3x3 k = massInv * Matrix3x3.Identity + s * inertiaInv * s.Transposed;
-		Matrix3x3 effectiveMass = k.Inverted;
-		Vector3 lambda = effectiveMass * (-(jV + (Beta / dt) * posC));
-
-		// velocity correction
-		v += massInv * lambda;
-		a += (inertiaInv * s.Transposed) * lambda;
-
-		//v *= 0.98f; // temp magic cheat
-		//a *= 0.98f; // temp magic cheat
-	}
-
-	private void SolveRotationConstraint(float dt) {
-		Vector3 jV = Vector3.zero;
-		if (LockRotationX) {
-			jV.x = a.x;
-		}
-		if (LockRotationY) {
-			jV.y = a.y;
-		}
-		if (LockRotationZ) {
-			jV.z = a.z;
-		}
-		Matrix3x3 effectiveMass = inertia;
-		Vector3 lambda = effectiveMass * (-(jV + (Beta / dt) * rotC));
-		a += inertiaInv * lambda;
-
-		//a *= 0.98f; // temp magic cheat
-	}
+    // integration
+    Object.transform.position += v * dt;
+    Object.transform.rotation = QuaternionUtil.Integrate(Object.transform.rotation, a, dt);
+  }
 }
